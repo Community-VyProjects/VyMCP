@@ -6,25 +6,15 @@ configuration for every VyManager feature. All tools are read-only.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from .client import VyManagerClient
-from .config import Config
+from .client import get_client
 from .features import FEATURES, resolve_feature
+from .writes import register_write_tools
 
 mcp = FastMCP("VyMCP")
-
-_client: Optional[VyManagerClient] = None
-
-
-def _get_client() -> VyManagerClient:
-    """Lazily build the VyManager client from the environment on first use."""
-    global _client
-    if _client is None:
-        _client = VyManagerClient(Config.from_env())
-    return _client
 
 
 @mcp.tool()
@@ -34,7 +24,7 @@ async def list_instances() -> list[dict[str, Any]]:
     Returns each instance's ``instance_id`` (pass it to other tools), name, site,
     host, VyOS version, and whether it is active.
     """
-    client = _get_client()
+    client = get_client()
     sites = await client.get("/session/sites")
 
     instances: list[dict[str, Any]] = []
@@ -72,7 +62,7 @@ async def get_capabilities(feature: str, instance_id: str) -> dict[str, Any]:
         instance_id: An instance_id from list_instances.
     """
     resolved = resolve_feature(feature)
-    return await _get_client().get(
+    return await get_client().get(
         f"/vyos/{resolved.slug}/capabilities", instance_id=instance_id
     )
 
@@ -86,9 +76,14 @@ async def get_config(feature: str, instance_id: str) -> dict[str, Any]:
         instance_id: An instance_id from list_instances.
     """
     resolved = resolve_feature(feature)
-    return await _get_client().get(
+    return await get_client().get(
         f"/vyos/{resolved.slug}/config", instance_id=instance_id
     )
+
+
+# Change tools are registered only when VYMANAGER_ENABLE_WRITES is set; a
+# read-only deployment exposes the four read tools above and nothing else.
+register_write_tools(mcp)
 
 
 def main() -> None:

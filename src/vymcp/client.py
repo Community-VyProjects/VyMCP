@@ -37,12 +37,34 @@ class VyManagerClient:
         instance_id: Optional[str] = None,
         params: Optional[dict[str, Any]] = None,
     ) -> Any:
+        return await self._request("GET", path, instance_id=instance_id, params=params)
+
+    async def post(
+        self,
+        path: str,
+        *,
+        instance_id: Optional[str] = None,
+        json: Optional[dict[str, Any]] = None,
+    ) -> Any:
+        return await self._request("POST", path, instance_id=instance_id, json=json)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        instance_id: Optional[str] = None,
+        params: Optional[dict[str, Any]] = None,
+        json: Optional[dict[str, Any]] = None,
+    ) -> Any:
         headers = {}
         if instance_id:
             headers["X-VyOS-Instance-Id"] = instance_id
 
         try:
-            response = await self._client.get(path, headers=headers, params=params)
+            response = await self._client.request(
+                method, path, headers=headers, params=params, json=json
+            )
         except httpx.RequestError as exc:
             raise VyManagerError(
                 f"Could not reach VyManager at {self._config.base_url}: {exc}"
@@ -85,3 +107,14 @@ class VyManagerClient:
             )
 
         return f"VyManager request failed ({status})." + (f" {detail}" if detail else "")
+
+
+_client: Optional[VyManagerClient] = None
+
+
+def get_client() -> VyManagerClient:
+    """Lazily build a shared VyManager client from the environment on first use."""
+    global _client
+    if _client is None:
+        _client = VyManagerClient(Config.from_env())
+    return _client

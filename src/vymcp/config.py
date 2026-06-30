@@ -6,6 +6,18 @@ import os
 from dataclasses import dataclass
 
 _FALSEY = {"0", "false", "no", "off"}
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def writes_enabled() -> bool:
+    """Whether configuration-changing tools are enabled (off by default).
+
+    This is the operator kill-switch, independent of the token's own scope: even
+    a read-write token cannot change config unless writes are explicitly enabled.
+    """
+    import os
+
+    return os.environ.get("VYMANAGER_ENABLE_WRITES", "false").strip().lower() in _TRUTHY
 
 
 @dataclass(frozen=True)
