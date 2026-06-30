@@ -17,7 +17,7 @@ from __future__ import annotations
 import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 DEFAULT_TTL_SECONDS = 600  # 10 minutes
 
@@ -70,7 +70,7 @@ class PlanStore:
         self._plans[plan.plan_id] = plan
         return plan
 
-    def get(self, plan_id: str) -> Optional[Plan]:
+    def get(self, plan_id: str) -> Plan | None:
         self._prune()
         return self._plans.get(plan_id)
 

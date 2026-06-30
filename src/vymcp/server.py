@@ -6,15 +6,26 @@ configuration for every VyManager feature. All tools are read-only.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from .client import get_client
+from .client import close_client, get_client
 from .features import FEATURES, resolve_feature
 from .writes import register_write_tools
 
-mcp = FastMCP("VyMCP")
+
+@asynccontextmanager
+async def _lifespan(_server: FastMCP):
+    """Ensure the shared HTTP client is closed cleanly on shutdown."""
+    try:
+        yield {}
+    finally:
+        await close_client()
+
+
+mcp = FastMCP("VyMCP", lifespan=_lifespan)
 
 
 @mcp.tool()

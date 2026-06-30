@@ -8,7 +8,7 @@ Flow: a ``propose_*`` tool validates input and stores a Plan (touching nothing).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from .changes import Plan, plan_store
 from .client import VyManagerError, get_client
@@ -37,7 +37,7 @@ def _plan_response(plan: Plan) -> dict[str, Any]:
     }
 
 
-async def _safe_get(path: str, instance_id: str) -> Optional[Any]:
+async def _safe_get(path: str, instance_id: str) -> Any | None:
     """Best-effort read used to enrich an apply response; never fails the apply."""
     try:
         return await get_client().get(path, instance_id=instance_id)
@@ -57,7 +57,7 @@ def register_write_tools(mcp) -> None:
         instance_id: str,
         name: str,
         addresses: list[str],
-        description: Optional[str] = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         """Propose creating an IPv4 firewall address-group. Does NOT apply.
 

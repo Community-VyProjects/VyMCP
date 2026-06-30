@@ -4,7 +4,7 @@
 
 VyMCP lets AI agents and MCP-aware tools (Claude, IDEs, automation) **read and manage VyOS routers** through a safe, audited interface. Rather than talking to routers directly, VyMCP wraps the VyManager API — so every action inherits VyManager's per-user authentication, role-based access control, audit logging, and version-aware (VyOS 1.4 / 1.5) configuration handling.
 
-> **Status: early development.** The VyManager-side foundation (per-user API tokens, instance scoping, read-only scopes, audit attribution) is in place. The MCP server itself is being built against that contract. Interfaces will change.
+> **Status: alpha.** Read tools cover every VyManager feature; guarded write tools currently cover firewall address groups, with more features being added. The transport is stdio today (hosted HTTP/SSE is planned). Interfaces may still change.
 
 ---
 
@@ -42,32 +42,92 @@ VyMCP authenticates to VyManager with a **personal access token** that a user mi
 
 This means you can hand VyMCP a token that, for example, can only *read* a single production router — and that limit is enforced by VyManager, not by VyMCP.
 
-## Capabilities (planned)
+## Tools
 
-VyMCP follows a **read-first** rollout:
+**Read (always available):**
 
-- **Read (all features):** `list_features`, `get_capabilities`, `get_config` — surface VyOS configuration and status across every VyManager feature.
-- **Curated writes (later):** typed, high-value tools (firewall rules, interfaces, NAT, static routes, …) with a preview-then-apply step wired to VyManager's commit-confirm flow.
+| Tool | Purpose |
+|---|---|
+| `list_instances` | The instances this token can reach (returns `instance_id`s for the other tools). |
+| `list_features` | Every VyOS feature VyMCP can read. |
+| `get_capabilities(feature, instance_id)` | Version-aware capability flags for a feature. |
+| `get_config(feature, instance_id)` | Normalized configuration for a feature. |
+
+**Write (only when `VYMANAGER_ENABLE_WRITES=true`):** changes go through a mandatory
+**propose → apply** flow — a `propose_*` tool validates and returns a `plan_id` without
+touching anything, then `apply_change(plan_id, confirm=true)` executes that one reviewed
+plan. Plans are single-use, time-limited, and bound to their target instance.
+
+| Tool | Purpose |
+|---|---|
+| `propose_create_address_group` / `propose_add_address_group_members` / `propose_remove_address_group_members` / `propose_delete_address_group` | Build a firewall address-group change (no effect until applied). |
+| `apply_change(plan_id, confirm)` | Apply a proposed plan, using VyManager's commit-confirm auto-rollback when available. |
+| `confirm_change(instance_id)` | Make a pending commit-confirm change permanent. |
+| `discard_changes(instance_id)` | Revert unsaved changes on an instance. |
+| `get_pending_changes(instance_id)` | Show the commit-confirm rollback window and any pending change. |
+
+### Guardrails
+
+- **Read-only by default** — write tools are not even registered unless `VYMANAGER_ENABLE_WRITES=true`, on top of the token's own read-only scope (a read-only token is rejected by VyManager regardless).
+- **No arbitrary config** — only curated, typed operations; there is no "set any path" tool.
+- **Propose → apply** — `apply_change` requires `confirm=true` and a valid plan id, so the model can only apply a change a human has seen.
+- **Never auto-confirms** — applied changes ride VyManager's commit-confirm timer and auto-revert unless explicitly confirmed.
 
 ## Requirements
 
 - A reachable [VyManager](https://github.com/Community-VyProjects/VyManager) instance.
-- A VyManager API token (read-only recommended to start).
+- A VyManager API token (Sites → API Tokens; read-only recommended to start).
 - One or more VyOS 1.4 / 1.5 routers registered in VyManager.
+- Python 3.10+.
 
 ## Getting started
 
-Setup instructions will land here as the server takes shape. At a high level, VyMCP will be configured with:
+Install:
 
-- the base URL of your VyManager API,
-- a `vym_` API token for authentication.
+```bash
+pip install -e .          # or: pip install -e ".[dev]" for tests
+```
+
+Configure via environment variables (see `.env.example`):
+
+```bash
+export VYMANAGER_BASE_URL="https://vymanager.example.com"
+export VYMANAGER_API_TOKEN="vym_…"      # read-only recommended
+# export VYMANAGER_ENABLE_WRITES=true   # opt in to write tools
+```
+
+Register with an MCP client (stdio). Example client config:
+
+```json
+{
+  "mcpServers": {
+    "vymcp": {
+      "command": "vymcp",
+      "env": {
+        "VYMANAGER_BASE_URL": "https://vymanager.example.com",
+        "VYMANAGER_API_TOKEN": "vym_…"
+      }
+    }
+  }
+}
+```
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest          # deterministic; no live device needed
+ruff check .
+mypy
+```
 
 ## Roadmap
 
-- [ ] MCP server skeleton (stdio transport) + token auth to VyManager
-- [ ] Generic read tools across all features
+- [x] stdio server + token auth to VyManager
+- [x] Read tools across all features
+- [x] Guarded write tools (propose → apply → commit-confirm)
+- [ ] More curated write features
 - [ ] Hosted remote transport (HTTP/SSE) with per-user auth
-- [ ] Curated write tools with preview / commit-confirm
 - [ ] Packaging and deployment docs
 
 ## Related projects

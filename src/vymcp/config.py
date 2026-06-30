@@ -28,7 +28,7 @@ class Config:
     timeout: float = 30.0
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         base_url = os.environ.get("VYMANAGER_BASE_URL")
         api_token = os.environ.get("VYMANAGER_API_TOKEN")
 
@@ -40,7 +40,7 @@ class Config:
             )
             if not value
         ]
-        if missing:
+        if missing or base_url is None or api_token is None:
             raise RuntimeError(
                 "Missing required environment variable(s): "
                 + ", ".join(missing)
