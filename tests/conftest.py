@@ -21,6 +21,12 @@ def make_client(handler: Callable[[httpx.Request], httpx.Response]) -> VyManager
 
 
 @pytest.fixture
+def make_mock_client():
+    """Factory fixture: call with a handler to get a mock-backed VyManagerClient."""
+    return make_client
+
+
+@pytest.fixture
 def install_client():
     """Install a mock-backed shared client; restore afterwards."""
     installed: list[VyManagerClient] = []

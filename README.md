@@ -1,5 +1,7 @@
 # VyMCP
 
+[![CI](https://github.com/Community-VyProjects/VyMCP/actions/workflows/ci.yml/badge.svg)](https://github.com/Community-VyProjects/VyMCP/actions/workflows/ci.yml)
+
 > Model Context Protocol (MCP) server for VyOS routers, powered by [VyManager](https://github.com/Community-VyProjects/VyManager).
 
 VyMCP lets AI agents and MCP-aware tools (Claude, IDEs, automation) **read and manage VyOS routers** through a safe, audited interface. Rather than talking to routers directly, VyMCP wraps the VyManager API — so every action inherits VyManager's per-user authentication, role-based access control, audit logging, and version-aware (VyOS 1.4 / 1.5) configuration handling.
