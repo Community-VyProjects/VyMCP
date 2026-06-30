@@ -76,4 +76,4 @@ Setup instructions will land here as the server takes shape. At a high level, Vy
 
 ## License
 
-To be determined.
+See `LICENSE` for details.
