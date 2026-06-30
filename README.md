@@ -63,9 +63,9 @@ plan. Plans are single-use, time-limited, and bound to their target instance.
 | Tool | Purpose |
 |---|---|
 | `propose_create_address_group` / `propose_add_address_group_members` / `propose_remove_address_group_members` / `propose_delete_address_group` | Build a firewall address-group change (no effect until applied). |
-| `apply_change(plan_id, confirm)` | Apply a proposed plan, using VyManager's commit-confirm auto-rollback when available. |
-| `confirm_change(instance_id)` | Make a pending commit-confirm change permanent. |
-| `discard_changes(instance_id)` | Revert unsaved changes on an instance. |
+| `apply_change(plan_id, confirm)` | Apply a proposed plan, protected by VyManager's commit-confirm when available. |
+| `confirm_change(instance_id)` | Keep a pending commit-confirm change (settles the device, stops the rollback). |
+| `discard_changes(instance_id)` | Drop unsaved changes — only when no commit-confirm is pending. |
 | `get_pending_changes(instance_id)` | Show the commit-confirm rollback window and any pending change. |
 
 ### Guardrails
@@ -73,7 +73,7 @@ plan. Plans are single-use, time-limited, and bound to their target instance.
 - **Read-only by default** — write tools are not even registered unless `VYMANAGER_ENABLE_WRITES=true`, on top of the token's own read-only scope (a read-only token is rejected by VyManager regardless).
 - **No arbitrary config** — only curated, typed operations; there is no "set any path" tool.
 - **Propose → apply** — `apply_change` requires `confirm=true` and a valid plan id, so the model can only apply a change a human has seen.
-- **Never auto-confirms** — applied changes ride VyManager's commit-confirm timer and auto-revert unless explicitly confirmed.
+- **Never auto-confirms** — applied changes ride VyManager's commit-confirm timer. That timer is a *lockout safety net*: if a change cuts off access to the router, the device auto-reverts (reboots) and you regain access. To keep a change, call `confirm_change`; to undo one that didn't lock you out, `confirm_change` then apply the inverse change.
 
 ## Requirements
 
