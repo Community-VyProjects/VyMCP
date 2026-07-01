@@ -1,0 +1,23 @@
+# Hosted VyMCP: one shared server that engineers connect to over HTTP, each
+# authenticating with their own VyManager token per request.
+#
+# Put TLS in front (reverse proxy) and set VYMCP_PUBLIC_URL to the https address.
+# Run a single replica — the pending-change store is in-memory.
+services:
+  vymcp:
+    image: ghcr.io/community-vyprojects/vymcp:latest
+    # build: .   # uncomment to build from source instead of pulling the image
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      VYMCP_TRANSPORT: http
+      VYMANAGER_BASE_URL: https://vymanager.example.com
+      VYMCP_PUBLIC_URL: https://vymcp.example.com
+      # Enable configuration-changing tools (off by default):
+      VYMANAGER_ENABLE_WRITES: "false"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

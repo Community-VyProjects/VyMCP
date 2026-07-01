@@ -6,7 +6,7 @@
 
 VyMCP lets AI agents read and manage VyOS routers through the VyManager API — inheriting VyManager's authentication, RBAC, audit, and commit-confirm safety. It never talks to routers directly.
 
-> **Status: alpha.** stdio transport; interfaces may change.
+> **Status: alpha.** Runs local (stdio) or as a shared hosted server (http); interfaces may change.
 
 ## Install
 
@@ -43,6 +43,20 @@ Set environment variables (see `.env.example`):
   }
 }
 ```
+
+## Hosted deployment (shared server)
+
+Run one VyMCP that many engineers connect to over HTTP, each authenticating with
+their own VyManager token per request:
+
+```bash
+docker compose up -d          # see docker-compose.yml
+```
+
+Set `VYMANAGER_BASE_URL` and `VYMCP_PUBLIC_URL` in the compose file. Engineers point
+their MCP client at `https://<vymcp>/mcp` with `Authorization: Bearer vym_…`.
+Terminate TLS at a reverse proxy and run a single replica (the pending-change store
+is in-memory).
 
 ## Tools
 
