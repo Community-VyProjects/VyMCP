@@ -115,7 +115,9 @@ def main() -> None:
         # advertise a different address in http mode, replace it with an allowlist
         # derived from config, or disable it when no hosts are configured.
         if config.allowed_hosts:
-            origins = [f"{scheme}://{h}" for h in config.allowed_hosts for scheme in ("http", "https")]
+            origins = [
+                f"{scheme}://{h}" for h in config.allowed_hosts for scheme in ("http", "https")
+            ]
             mcp.settings.transport_security = TransportSecuritySettings(
                 enable_dns_rebinding_protection=True,
                 allowed_hosts=list(config.allowed_hosts),
