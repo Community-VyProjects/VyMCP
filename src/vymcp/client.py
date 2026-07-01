@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from .config import Config
+from .config import Config, ServerConfig
 
 logger = logging.getLogger("vymcp")
 
@@ -122,28 +122,78 @@ class VyManagerClient:
         return f"VyManager request failed ({status})." + (f" {detail}" if detail else "")
 
 
-_client: VyManagerClient | None = None
+_server_config: ServerConfig | None = None
+_clients: dict[str, VyManagerClient] = {}
+_override: VyManagerClient | None = None  # test hook
 
 
-def get_client() -> VyManagerClient:
-    """Lazily build a shared VyManager client from the environment on first use."""
-    global _client
-    if _client is None:
-        config = Config.from_env()
-        logger.info("Connecting to VyManager at %s", config.base_url)
-        _client = VyManagerClient(config)
-    return _client
+def server_config() -> ServerConfig:
+    global _server_config
+    if _server_config is None:
+        _server_config = ServerConfig.from_env()
+        logger.info(
+            "VyManager %s (%s transport)", _server_config.base_url, _server_config.transport
+        )
+    return _server_config
+
+
+def _current_token() -> str:
+    """The token for the current request: the caller's bearer token in http mode,
+    or the server's env token in stdio mode."""
+    try:
+        from mcp.server.auth.middleware.auth_context import get_access_token
+
+        access = get_access_token()
+    except Exception:
+        access = None
+    if access is not None:
+        return access.token
+
+    token = server_config().api_token
+    if not token:
+        raise VyManagerError("No API token available for this request.")
+    return token
+
+
+def current_client() -> VyManagerClient:
+    """The VyManager client for the current request's identity.
+
+    In http mode each caller's token gets its own (cached) client; in stdio mode
+    there is a single env-token client. Tests can override via set_client().
+    """
+    if _override is not None:
+        return _override
+    token = _current_token()
+    if token not in _clients:
+        _clients[token] = VyManagerClient(server_config().client_config(token))
+    return _clients[token]
+
+
+def current_owner() -> str:
+    """A stable identity for the current caller, used to scope pending plans."""
+    try:
+        from mcp.server.auth.middleware.auth_context import get_access_token
+
+        access = get_access_token()
+    except Exception:
+        access = None
+    if access is not None and access.subject:
+        return access.subject
+    return "local"
 
 
 def set_client(client: VyManagerClient | None) -> None:
-    """Override the shared client (used by tests)."""
-    global _client
-    _client = client
+    """Override the client for all requests (used by tests)."""
+    global _override
+    _override = client
 
 
 async def close_client() -> None:
-    """Close the shared client on shutdown."""
-    global _client
-    if _client is not None:
-        await _client.aclose()
-        _client = None
+    """Close all cached clients on shutdown."""
+    global _override
+    for client in list(_clients.values()):
+        await client.aclose()
+    _clients.clear()
+    if _override is not None:
+        await _override.aclose()
+        _override = None

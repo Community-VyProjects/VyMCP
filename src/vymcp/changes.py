@@ -25,6 +25,7 @@ DEFAULT_TTL_SECONDS = 600  # 10 minutes
 @dataclass
 class Plan:
     plan_id: str
+    owner: str  # the caller who proposed it; only they may apply it
     instance_id: str
     feature: str
     path: str  # VyManager endpoint the apply will POST to
@@ -50,6 +51,7 @@ class PlanStore:
     def create(
         self,
         *,
+        owner: str,
         instance_id: str,
         feature: str,
         path: str,
@@ -60,6 +62,7 @@ class PlanStore:
         self._prune()
         plan = Plan(
             plan_id="plan_" + secrets.token_hex(8),
+            owner=owner,
             instance_id=instance_id,
             feature=feature,
             path=path,
@@ -70,9 +73,13 @@ class PlanStore:
         self._plans[plan.plan_id] = plan
         return plan
 
-    def get(self, plan_id: str) -> Plan | None:
+    def get(self, plan_id: str, owner: str) -> Plan | None:
+        """Return the plan only if it exists and belongs to ``owner``."""
         self._prune()
-        return self._plans.get(plan_id)
+        plan = self._plans.get(plan_id)
+        if plan is None or plan.owner != owner:
+            return None
+        return plan
 
     def consume(self, plan_id: str) -> None:
         """Remove a plan after it has been successfully applied (single-use)."""

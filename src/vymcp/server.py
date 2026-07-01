@@ -11,7 +11,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from .client import close_client, get_client
+from .client import close_client, current_client
 from .features import FEATURES, resolve_feature
 from .writes import register_write_tools
 
@@ -35,7 +35,7 @@ async def list_instances() -> list[dict[str, Any]]:
     Returns each instance's ``instance_id`` (pass it to other tools), name, site,
     host, VyOS version, and whether it is active.
     """
-    client = get_client()
+    client = current_client()
     sites = await client.get("/session/sites")
 
     instances: list[dict[str, Any]] = []
@@ -73,7 +73,7 @@ async def get_capabilities(feature: str, instance_id: str) -> dict[str, Any]:
         instance_id: An instance_id from list_instances.
     """
     resolved = resolve_feature(feature)
-    return await get_client().get(
+    return await current_client().get(
         f"/vyos/{resolved.slug}/capabilities", instance_id=instance_id
     )
 
@@ -87,7 +87,7 @@ async def get_config(feature: str, instance_id: str) -> dict[str, Any]:
         instance_id: An instance_id from list_instances.
     """
     resolved = resolve_feature(feature)
-    return await get_client().get(
+    return await current_client().get(
         f"/vyos/{resolved.slug}/config", instance_id=instance_id
     )
 
@@ -98,8 +98,25 @@ register_write_tools(mcp)
 
 
 def main() -> None:
-    """Console-script entry point. Runs the server over stdio."""
-    mcp.run()
+    """Console-script entry point. Runs stdio or a hosted http server per config."""
+    from .client import server_config
+
+    config = server_config()
+    if config.transport == "http":
+        from mcp.server.auth.settings import AuthSettings
+
+        from .auth import VyManagerTokenVerifier
+
+        mcp.settings.host = config.host
+        mcp.settings.port = config.port
+        mcp.settings.auth = AuthSettings(
+            issuer_url=config.base_url,  # type: ignore[arg-type]  # pydantic coerces str->AnyHttpUrl
+            resource_server_url=config.public_url,  # type: ignore[arg-type]
+        )
+        mcp._token_verifier = VyManagerTokenVerifier(config)
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

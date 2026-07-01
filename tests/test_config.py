@@ -1,39 +1,63 @@
 import pytest
 
-from vymcp.config import Config, writes_enabled
+from vymcp.config import ServerConfig, writes_enabled
 
 
-def test_from_env_requires_url_and_token(monkeypatch):
+def test_requires_base_url(monkeypatch):
     monkeypatch.delenv("VYMANAGER_BASE_URL", raising=False)
+    with pytest.raises(RuntimeError, match="VYMANAGER_BASE_URL"):
+        ServerConfig.from_env()
+
+
+def test_stdio_requires_token(monkeypatch):
+    monkeypatch.setenv("VYMANAGER_BASE_URL", "http://h")
     monkeypatch.delenv("VYMANAGER_API_TOKEN", raising=False)
-    with pytest.raises(RuntimeError) as exc:
-        Config.from_env()
-    assert "VYMANAGER_BASE_URL" in str(exc.value)
-    assert "VYMANAGER_API_TOKEN" in str(exc.value)
+    monkeypatch.delenv("VYMCP_TRANSPORT", raising=False)  # default stdio
+    with pytest.raises(RuntimeError, match="VYMANAGER_API_TOKEN"):
+        ServerConfig.from_env()
 
 
-def test_from_env_parses_values(monkeypatch):
-    monkeypatch.setenv("VYMANAGER_BASE_URL", "http://host:8000/")
-    monkeypatch.setenv("VYMANAGER_API_TOKEN", "vym_abc")
-    monkeypatch.setenv("VYMANAGER_VERIFY_SSL", "false")
-    monkeypatch.setenv("VYMANAGER_TIMEOUT", "12")
-    cfg = Config.from_env()
-    assert cfg.base_url == "http://host:8000"  # trailing slash stripped
-    assert cfg.api_token == "vym_abc"
-    assert cfg.verify_ssl is False
-    assert cfg.timeout == 12.0
+def test_http_does_not_require_token(monkeypatch):
+    monkeypatch.setenv("VYMANAGER_BASE_URL", "http://h:8000/")
+    monkeypatch.setenv("VYMCP_TRANSPORT", "http")
+    monkeypatch.delenv("VYMANAGER_API_TOKEN", raising=False)
+    cfg = ServerConfig.from_env()
+    assert cfg.transport == "http"
+    assert cfg.base_url == "http://h:8000"  # trailing slash stripped
+    assert cfg.api_token is None
 
 
-def test_verify_ssl_defaults_true(monkeypatch):
+def test_http_public_url_default(monkeypatch):
+    monkeypatch.setenv("VYMANAGER_BASE_URL", "http://h")
+    monkeypatch.setenv("VYMCP_TRANSPORT", "http")
+    monkeypatch.setenv("VYMCP_HOST", "0.0.0.0")
+    monkeypatch.setenv("VYMCP_PORT", "9000")
+    monkeypatch.delenv("VYMCP_PUBLIC_URL", raising=False)
+    cfg = ServerConfig.from_env()
+    assert cfg.public_url == "http://0.0.0.0:9000"
+
+
+def test_client_config_carries_token(monkeypatch):
     monkeypatch.setenv("VYMANAGER_BASE_URL", "http://h")
     monkeypatch.setenv("VYMANAGER_API_TOKEN", "vym_x")
-    monkeypatch.delenv("VYMANAGER_VERIFY_SSL", raising=False)
-    assert Config.from_env().verify_ssl is True
+    monkeypatch.setenv("VYMANAGER_VERIFY_SSL", "false")
+    cfg = ServerConfig.from_env()
+    cc = cfg.client_config("vym_abc")
+    assert cc.api_token == "vym_abc"
+    assert cc.base_url == "http://h"
+    assert cc.verify_ssl is False
+
+
+def test_bad_transport(monkeypatch):
+    monkeypatch.setenv("VYMANAGER_BASE_URL", "http://h")
+    monkeypatch.setenv("VYMCP_TRANSPORT", "carrier-pigeon")
+    with pytest.raises(RuntimeError, match="stdio.*http|http.*stdio"):
+        ServerConfig.from_env()
 
 
 @pytest.mark.parametrize("value,expected", [
-    ("true", True), ("1", True), ("yes", True), ("on", True),
-    ("false", False), ("0", False), ("", False), ("nope", False),
+    ("true", True), ("1", True), ("on", True),
+    ("false", False), ("", False), ("nope", False),
 ])
 def test_writes_enabled(monkeypatch, value, expected):
     monkeypatch.setenv("VYMANAGER_ENABLE_WRITES", value)

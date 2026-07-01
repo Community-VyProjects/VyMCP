@@ -15,47 +15,85 @@ def writes_enabled() -> bool:
     This is the operator kill-switch, independent of the token's own scope: even
     a read-write token cannot change config unless writes are explicitly enabled.
     """
-    import os
-
     return os.environ.get("VYMANAGER_ENABLE_WRITES", "false").strip().lower() in _TRUTHY
+
+
+def _verify_ssl() -> bool:
+    return os.environ.get("VYMANAGER_VERIFY_SSL", "true").lower() not in _FALSEY
+
+
+def _timeout() -> float:
+    try:
+        return float(os.environ.get("VYMANAGER_TIMEOUT", "30"))
+    except ValueError:
+        return 30.0
 
 
 @dataclass(frozen=True)
 class Config:
+    """Per-client config: everything needed to talk to VyManager as one token."""
+
     base_url: str
     api_token: str
     verify_ssl: bool = True
     timeout: float = 30.0
 
+
+@dataclass(frozen=True)
+class ServerConfig:
+    """Server-level config. In http mode the token arrives per request, so
+    ``api_token`` is only required for stdio (single-tenant, local) mode."""
+
+    base_url: str
+    verify_ssl: bool = True
+    timeout: float = 30.0
+    transport: str = "stdio"  # "stdio" or "http"
+    host: str = "127.0.0.1"
+    port: int = 8080
+    public_url: str = "http://127.0.0.1:8080"  # externally reachable URL (http mode)
+    api_token: str | None = None
+
     @classmethod
-    def from_env(cls) -> Config:
+    def from_env(cls) -> ServerConfig:
         base_url = os.environ.get("VYMANAGER_BASE_URL")
+        if not base_url:
+            raise RuntimeError("Missing required environment variable: VYMANAGER_BASE_URL.")
+
+        transport = os.environ.get("VYMCP_TRANSPORT", "stdio").strip().lower()
+        if transport not in {"stdio", "http"}:
+            raise RuntimeError(f"VYMCP_TRANSPORT must be 'stdio' or 'http', got '{transport}'.")
+
         api_token = os.environ.get("VYMANAGER_API_TOKEN")
-
-        missing = [
-            name
-            for name, value in (
-                ("VYMANAGER_BASE_URL", base_url),
-                ("VYMANAGER_API_TOKEN", api_token),
-            )
-            if not value
-        ]
-        if missing or base_url is None or api_token is None:
+        if transport == "stdio" and not api_token:
             raise RuntimeError(
-                "Missing required environment variable(s): "
-                + ", ".join(missing)
-                + ". See .env.example."
+                "VYMANAGER_API_TOKEN is required for stdio transport. "
+                "(In http mode, clients present their own token per request.)"
             )
 
-        verify_ssl = os.environ.get("VYMANAGER_VERIFY_SSL", "true").lower() not in _FALSEY
         try:
-            timeout = float(os.environ.get("VYMANAGER_TIMEOUT", "30"))
+            port = int(os.environ.get("VYMCP_PORT", "8080"))
         except ValueError:
-            timeout = 30.0
+            port = 8080
+
+        host = os.environ.get("VYMCP_HOST", "127.0.0.1")
+        public_url = os.environ.get("VYMCP_PUBLIC_URL") or f"http://{host}:{port}"
 
         return cls(
             base_url=base_url.rstrip("/"),
+            verify_ssl=_verify_ssl(),
+            timeout=_timeout(),
+            transport=transport,
+            host=host,
+            port=port,
+            public_url=public_url.rstrip("/"),
             api_token=api_token,
-            verify_ssl=verify_ssl,
-            timeout=timeout,
+        )
+
+    def client_config(self, token: str) -> Config:
+        """Build a per-client Config for a specific token."""
+        return Config(
+            base_url=self.base_url,
+            api_token=token,
+            verify_ssl=self.verify_ssl,
+            timeout=self.timeout,
         )
