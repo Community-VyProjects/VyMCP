@@ -5,8 +5,12 @@ _VOCAB = {
     "feature": "nat",
     "operations": [
         {"op": "set_source_rule", "args": ["rule"], "arg_count": 1, "description": "Rule."},
-        {"op": "set_source_rule_translation_address", "args": ["rule", "addr"],
-         "arg_count": 2, "description": "Translation address."},
+        {
+            "op": "set_source_rule_translation_address",
+            "args": ["rule", "addr"],
+            "arg_count": 2,
+            "description": "Translation address.",
+        },
         {"op": "delete_all", "args": [], "arg_count": 0, "description": "Delete all."},
     ],
 }
@@ -51,6 +55,7 @@ def _discovery_handler(extra=None):
             if r is not None:
                 return r
         return httpx.Response(404, json={})
+
     return handler
 
 
@@ -58,7 +63,9 @@ async def test_describe_merges_ops_and_fields(write_tools, install_client):
     install_client(_discovery_handler())
     out = await write_tools["describe_feature_operations"]("nat")
     assert {o["op"] for o in out["operations"]} == {
-        "set_source_rule", "set_source_rule_translation_address", "delete_all"
+        "set_source_rule",
+        "set_source_rule_translation_address",
+        "delete_all",
     }
     assert out["top_level_fields"]["nat_type"]["required"] is True
 
@@ -66,12 +73,14 @@ async def test_describe_merges_ops_and_fields(write_tools, install_client):
 async def test_propose_builds_body_with_fields(write_tools, install_client):
     install_client(_discovery_handler())
     plan = await write_tools["propose_operations"](
-        "nat", "i1",
+        "nat",
+        "i1",
         [{"op": "set_source_rule", "value": "100"}],
         fields={"nat_type": "source"},
     )
     assert plan["applied"] is False
     from vymcp.changes import plan_store
+
     body = plan_store.get(plan["plan_id"], "local").body
     assert body == {"nat_type": "source", "operations": [{"op": "set_source_rule", "value": "100"}]}
 
@@ -92,6 +101,7 @@ async def test_propose_zero_arg_op_needs_no_value(write_tools, install_client):
     install_client(_discovery_handler())
     plan = await write_tools["propose_operations"]("nat", "i1", [{"op": "delete_all"}])
     from vymcp.changes import plan_store
+
     assert plan_store.get(plan["plan_id"], "local").body["operations"] == [{"op": "delete_all"}]
 
 
@@ -106,8 +116,12 @@ _BONDING = {
     "subject_field": "interface_name",
     "operations": [
         {"op": "set_interface_disable", "args": ["interface"], "arg_count": 1, "description": "x"},
-        {"op": "set_interface_address", "args": ["interface", "addr"],
-         "arg_count": 2, "description": "x"},
+        {
+            "op": "set_interface_address",
+            "args": ["interface", "addr"],
+            "arg_count": 2,
+            "description": "x",
+        },
     ],
 }
 
@@ -123,9 +137,7 @@ def _bonding_handler(request: httpx.Request) -> httpx.Response:
 async def test_subject_feature_requires_subject(write_tools, install_client):
     install_client(_bonding_handler)
     with pytest.raises(ValueError, match="interface_name"):
-        await write_tools["propose_operations"](
-            "bonding", "i1", [{"op": "set_interface_disable"}]
-        )
+        await write_tools["propose_operations"]("bonding", "i1", [{"op": "set_interface_disable"}])
 
 
 async def test_subject_feature_zero_value_op_ok(write_tools, install_client):
@@ -135,6 +147,7 @@ async def test_subject_feature_zero_value_op_ok(write_tools, install_client):
         "bonding", "i1", [{"op": "set_interface_disable"}], fields={"interface_name": "bond0"}
     )
     from vymcp.changes import plan_store
+
     body = plan_store.get(plan["plan_id"], "local").body
     assert body == {"interface_name": "bond0", "operations": [{"op": "set_interface_disable"}]}
 
@@ -146,6 +159,54 @@ async def test_subject_feature_value_op_needs_value(write_tools, install_client)
         await write_tools["propose_operations"](
             "bonding", "i1", [{"op": "set_interface_address"}], fields={"interface_name": "bond0"}
         )
+
+
+async def test_subject_included_in_value_is_rejected(write_tools, install_client):
+    install_client(_bonding_handler)
+    # The classic mistake: subject re-jammed into the value. set_interface_address
+    # wants 1 value arg (the address); passing "bond0,10.0.0.1/32" is 2 -> reject
+    # here instead of letting the device answer an opaque 400.
+    with pytest.raises(ValueError, match="expects 1 comma-separated value"):
+        await write_tools["propose_operations"](
+            "bonding",
+            "i1",
+            [{"op": "set_interface_address", "value": "bond0,10.0.0.1/32"}],
+            fields={"interface_name": "bond0"},
+        )
+
+
+async def test_correct_single_value_accepted(write_tools, install_client):
+    install_client(_bonding_handler)
+    plan = await write_tools["propose_operations"](
+        "bonding",
+        "i1",
+        [{"op": "set_interface_address", "value": "10.0.0.1/32"}],
+        fields={"interface_name": "bond0"},
+    )
+    from vymcp.changes import plan_store
+
+    body = plan_store.get(plan["plan_id"], "local").body
+    assert body["operations"] == [{"op": "set_interface_address", "value": "10.0.0.1/32"}]
+
+
+async def test_too_many_args_rejected_non_subject(write_tools, install_client):
+    install_client(_discovery_handler())
+    # set_source_rule takes 1 arg; passing 2 comma parts is rejected.
+    with pytest.raises(ValueError, match="expects 1 comma-separated value"):
+        await write_tools["propose_operations"](
+            "nat", "i1", [{"op": "set_source_rule", "value": "100,extra"}]
+        )
+
+
+async def test_describe_exposes_value_args(write_tools, install_client):
+    install_client(_bonding_handler)
+    out = await write_tools["describe_feature_operations"]("bonding")
+    ops = {o["op"]: o for o in out["operations"]}
+    # The subject is stripped from what the value must supply.
+    assert ops["set_interface_address"]["value_args"] == ["addr"]
+    assert ops["set_interface_address"]["value_arg_count"] == 1
+    assert ops["set_interface_disable"]["value_arg_count"] == 0
+    assert "never include the subject" in out["note"]
 
 
 async def test_generic_plan_applies(write_tools, install_client):
