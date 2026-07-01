@@ -1,0 +1,24 @@
+name: Publish to PyPI
+
+# One-time setup: create the project on PyPI and add this repo as a Trusted
+# Publisher (PyPI -> project -> Publishing), then no API token is needed.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC for trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
