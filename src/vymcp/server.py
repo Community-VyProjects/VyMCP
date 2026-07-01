@@ -104,11 +104,29 @@ def main() -> None:
     config = server_config()
     if config.transport == "http":
         from mcp.server.auth.settings import AuthSettings
+        from mcp.server.transport_security import TransportSecuritySettings
 
         from .auth import VyManagerTokenVerifier
 
         mcp.settings.host = config.host
         mcp.settings.port = config.port
+        # FastMCP auto-configures DNS-rebinding protection for localhost at
+        # construction time (allowing only 127.0.0.1/localhost). Since we bind and
+        # advertise a different address in http mode, replace it with an allowlist
+        # derived from config, or disable it when no hosts are configured.
+        if config.allowed_hosts:
+            origins = [
+                f"{scheme}://{h}" for h in config.allowed_hosts for scheme in ("http", "https")
+            ]
+            mcp.settings.transport_security = TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=list(config.allowed_hosts),
+                allowed_origins=origins,
+            )
+        else:
+            mcp.settings.transport_security = TransportSecuritySettings(
+                enable_dns_rebinding_protection=False,
+            )
         mcp.settings.auth = AuthSettings(
             issuer_url=config.base_url,  # type: ignore[arg-type]  # pydantic coerces str->AnyHttpUrl
             resource_server_url=config.public_url,  # type: ignore[arg-type]
