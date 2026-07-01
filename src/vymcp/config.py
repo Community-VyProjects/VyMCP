@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 _FALSEY = {"0", "false", "no", "off"}
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -52,6 +53,9 @@ class ServerConfig:
     port: int = 8080
     public_url: str = "http://127.0.0.1:8080"  # externally reachable URL (http mode)
     api_token: str | None = None
+    # Host header values the http server accepts (DNS-rebinding protection). Empty
+    # tuple means allow any host (protection disabled).
+    allowed_hosts: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_env(cls) -> ServerConfig:
@@ -77,6 +81,20 @@ class ServerConfig:
 
         host = os.environ.get("VYMCP_HOST", "127.0.0.1")
         public_url = os.environ.get("VYMCP_PUBLIC_URL") or f"http://{host}:{port}"
+        public_url = public_url.rstrip("/")
+
+        # Which Host headers the http server accepts. Explicit override wins;
+        # otherwise default to the public URL's host:port so external clients that
+        # reach the server at its advertised address are allowed. "*" disables the
+        # DNS-rebinding check entirely (use only behind a trusted proxy).
+        allowed_env = os.environ.get("VYMCP_ALLOWED_HOSTS", "").strip()
+        if allowed_env == "*":
+            allowed_hosts: tuple[str, ...] = ()
+        elif allowed_env:
+            allowed_hosts = tuple(h.strip() for h in allowed_env.split(",") if h.strip())
+        else:
+            netloc = urlparse(public_url).netloc
+            allowed_hosts = (netloc,) if netloc else ()
 
         return cls(
             base_url=base_url.rstrip("/"),
@@ -85,8 +103,9 @@ class ServerConfig:
             transport=transport,
             host=host,
             port=port,
-            public_url=public_url.rstrip("/"),
+            public_url=public_url,
             api_token=api_token,
+            allowed_hosts=allowed_hosts,
         )
 
     def client_config(self, token: str) -> Config:
