@@ -29,16 +29,25 @@ def make_mock_client():
 @pytest.fixture
 def install_client():
     """Install a mock-backed shared client; restore afterwards."""
-    installed: list[VyManagerClient] = []
+    from vymcp import discovery
+
+    discovery.clear_cache()
 
     def _install(handler: Callable[[httpx.Request], httpx.Response]) -> VyManagerClient:
         c = make_client(handler)
         client_module.set_client(c)
-        installed.append(c)
         return c
 
     yield _install
     client_module.set_client(None)
+    discovery.clear_cache()
+
+
+@pytest.fixture
+def write_tools(monkeypatch, collect_write_tools):
+    """Write tools with the kill-switch enabled, as {name: fn}."""
+    monkeypatch.setenv("VYMANAGER_ENABLE_WRITES", "true")
+    return collect_write_tools()
 
 
 @pytest.fixture

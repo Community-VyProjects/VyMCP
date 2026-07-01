@@ -2,13 +2,6 @@ import httpx
 import pytest
 
 
-@pytest.fixture
-def write_tools(monkeypatch, collect_write_tools):
-    """Write tools with the kill-switch enabled."""
-    monkeypatch.setenv("VYMANAGER_ENABLE_WRITES", "true")
-    return collect_write_tools()
-
-
 def _apply_handler(batch_response, cc_active=True, seconds=55):
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -99,4 +92,26 @@ async def test_apply_no_commit_confirm(write_tools, install_client):
     res = await write_tools["apply_change"](plan["plan_id"], confirm=True)
     assert res["applied"] is True
     assert res["commit_confirm"] is False
-    assert "live immediately" in res["next_step"]
+    assert "inverse change" in res["next_step"]
+
+
+async def test_discard_refused_during_commit_confirm(write_tools, install_client):
+    def handler(request):
+        if request.url.path == "/vyos/config/commit-confirm/status":
+            return httpx.Response(200, json={"active": True, "seconds_remaining": 30})
+        return httpx.Response(200, json={"success": True})
+    install_client(handler)
+    with pytest.raises(ValueError, match="commit-confirm is active"):
+        await write_tools["discard_changes"]("i1")
+
+
+async def test_discard_ok_when_no_commit_confirm(write_tools, install_client):
+    def handler(request):
+        if request.url.path == "/vyos/config/commit-confirm/status":
+            return httpx.Response(200, json={"active": False})
+        if request.url.path == "/vyos/config/discard":
+            return httpx.Response(200, json={"success": True, "message": "discarded"})
+        return httpx.Response(404, json={})
+    install_client(handler)
+    res = await write_tools["discard_changes"]("i1")
+    assert res["discarded"] is True

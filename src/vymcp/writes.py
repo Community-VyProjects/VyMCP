@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import discovery
 from .changes import Plan, plan_store
 from .client import VyManagerError, get_client
 from .config import writes_enabled
@@ -157,6 +158,100 @@ def register_write_tools(mcp) -> None:
         )
         return _plan_response(plan)
 
+    # ---- Generic, discovery-driven proposing -------------------------------
+
+    @mcp.tool()
+    async def describe_feature_operations(feature: str) -> dict[str, Any]:
+        """List the operations available for a feature, for use with propose_operations.
+
+        Returns each op's name, arg_count, and description, plus any required
+        top-level body fields (e.g. nat_type, group_name).
+
+        Args:
+            feature: A feature slug from list_features (e.g. "nat", "static-routes").
+        """
+        operations = await discovery.get_feature_operations(feature)
+        fields = await discovery.get_top_level_fields(feature)
+        subject_field = await discovery.get_subject_field(feature)
+        return {
+            "feature": feature,
+            "subject_field": subject_field,
+            "top_level_fields": fields,
+            "operations": operations,
+            "note": (
+                f"This feature requires the '{subject_field}' field (the subject, e.g. the "
+                f"interface name); each op's value supplies the args after it."
+                if subject_field
+                else None
+            ),
+        }
+
+    @mcp.tool()
+    async def propose_operations(
+        feature: str,
+        instance_id: str,
+        operations: list[dict[str, Any]],
+        fields: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Propose a batch of operations for any feature. Does NOT apply.
+
+        Each operation is ``{"op": <name>, "value": <str>}`` where op comes from
+        describe_feature_operations. Two-argument ops take a comma-joined value.
+        Returns a plan_id to pass to apply_change after the user approves.
+
+        Args:
+            feature: A feature slug (e.g. "nat", "static-routes").
+            instance_id: Target instance from list_instances.
+            operations: The operations to perform.
+            fields: Required top-level body fields for the feature, if any
+                (see describe_feature_operations).
+        """
+        vocab = {o["op"]: o for o in await discovery.get_feature_operations(feature)}
+        if not operations:
+            raise ValueError("Provide at least one operation.")
+
+        # Subject features inject a top-level field as each op's first arg, so the
+        # op value only supplies the args AFTER it.
+        subject_field = await discovery.get_subject_field(feature)
+        if subject_field and not (fields or {}).get(subject_field):
+            raise ValueError(
+                f"'{feature}' requires the '{subject_field}' field (e.g. the interface "
+                f"name); pass it in fields."
+            )
+        subject_args = 1 if subject_field else 0
+
+        normalized: list[dict[str, Any]] = []
+        for op in operations:
+            name = op.get("op")
+            if name not in vocab:
+                raise ValueError(
+                    f"Unknown operation '{name}' for '{feature}'. Call "
+                    f"describe_feature_operations('{feature}') for the vocabulary."
+                )
+            value = op.get("value")
+            if vocab[name]["arg_count"] - subject_args >= 1 and not value:
+                raise ValueError(f"Operation '{name}' requires a value.")
+            entry: dict[str, Any] = {"op": name}
+            if value is not None:
+                entry["value"] = value
+            normalized.append(entry)
+
+        body: dict[str, Any] = dict(fields or {})
+        body["operations"] = normalized
+        summary = (
+            f"{len(normalized)} operation(s) on '{feature}' (instance {instance_id})"
+            + (f"; fields {fields}" if fields else "")
+        )
+        plan = plan_store.create(
+            instance_id=instance_id,
+            feature=feature,
+            path=f"/vyos/{feature}/batch",
+            body=body,
+            summary=summary,
+            operations=normalized,
+        )
+        return _plan_response(plan)
+
     # ---- Change management -------------------------------------------------
 
     @mcp.tool()
@@ -220,15 +315,18 @@ def register_write_tools(mcp) -> None:
             response["commit_confirm"] = True
             response["seconds_remaining"] = status.get("seconds_remaining")
             response["next_step"] = (
-                "The change is LIVE but will AUTO-REVERT when the timer expires. Call "
-                "confirm_change(instance_id) to keep it, or discard_changes(instance_id) "
-                "to revert now."
+                "The change is LIVE, protected by commit-confirm: if it cut off access to "
+                "the router, the device auto-reverts (reboots) when the timer expires and "
+                "you regain access — so do nothing in that case. If access is fine, call "
+                "confirm_change(instance_id) to keep it. To UNDO a change that did not lock "
+                "you out, confirm_change first, then apply the inverse change (e.g. the "
+                "matching delete ops)."
             )
         else:
             response["commit_confirm"] = False
             response["next_step"] = (
-                "The change is live immediately (no auto-rollback timer on this instance). "
-                "Call discard_changes(instance_id) to revert unsaved changes if needed."
+                "The change is live immediately (no commit-confirm safety net on this "
+                "instance). To undo it, apply the inverse change (the matching delete ops)."
             )
         return response
 
@@ -244,7 +342,19 @@ def register_write_tools(mcp) -> None:
 
     @mcp.tool()
     async def discard_changes(instance_id: str) -> dict[str, Any]:
-        """Discard all unsaved configuration changes on an instance (revert to last saved)."""
+        """Discard unsaved configuration changes on an instance (revert to last saved).
+
+        Only valid when NO commit-confirm is pending. While a commit-confirm is
+        active the device is in a pending-reboot state, so to undo such a change
+        confirm_change first and then apply the inverse change instead.
+        """
+        status = await _safe_get(_CC_STATUS, instance_id)
+        if isinstance(status, dict) and status.get("active"):
+            raise ValueError(
+                "A commit-confirm is active for this instance, so discard is unsafe. "
+                "If the change locked you out, wait for the auto-revert. Otherwise call "
+                "confirm_change(instance_id), then apply the inverse change to undo it."
+            )
         result = await get_client().post(_DISCARD, instance_id=instance_id)
         return {
             "discarded": bool(result.get("success", True)) if isinstance(result, dict) else True,
