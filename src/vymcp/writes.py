@@ -177,17 +177,33 @@ def register_write_tools(mcp) -> None:
         operations = await discovery.get_feature_operations(feature)
         fields = await discovery.get_top_level_fields(feature)
         subject_field = await discovery.get_subject_field(feature)
+
+        # Spell out, per op, exactly what the *value* must contain: the args AFTER
+        # the subject (which is passed separately via fields). This is the contract
+        # callers most often get wrong — mixing the subject back into the value.
+        subject_args = 1 if subject_field else 0
+        described = [
+            {
+                **op,
+                "value_args": op.get("args", [])[subject_args:],
+                "value_arg_count": max(op.get("arg_count", 0) - subject_args, 0),
+            }
+            for op in operations
+        ]
+        note = (
+            f"Pass the subject via fields['{subject_field}']. Each op's 'value' supplies "
+            "ONLY its 'value_args', comma-joined in order — never include the subject in "
+            "the value. Ops with value_arg_count 0 take no value."
+            if subject_field
+            else "Each op's 'value' supplies its 'value_args', comma-joined in order. "
+            "Ops with value_arg_count 0 take no value."
+        )
         return {
             "feature": feature,
             "subject_field": subject_field,
             "top_level_fields": fields,
-            "operations": operations,
-            "note": (
-                f"This feature requires the '{subject_field}' field (the subject, e.g. the "
-                f"interface name); each op's value supplies the args after it."
-                if subject_field
-                else None
-            ),
+            "operations": described,
+            "note": note,
         }
 
     @mcp.tool()
@@ -233,8 +249,23 @@ def register_write_tools(mcp) -> None:
                     f"describe_feature_operations('{feature}') for the vocabulary."
                 )
             value = op.get("value")
-            if vocab[name]["arg_count"] - subject_args >= 1 and not value:
+            expected = vocab[name]["arg_count"] - subject_args
+            if expected >= 1 and not value:
                 raise ValueError(f"Operation '{name}' requires a value.")
+            if expected >= 1 and value:
+                parts = value.split(",")
+                if len(parts) != expected:
+                    wanted = ", ".join(vocab[name].get("args", [])[subject_args:])
+                    hint = (
+                        f" The subject '{subject_field}' is supplied via fields — do NOT "
+                        "include it in the value."
+                        if subject_field
+                        else ""
+                    )
+                    raise ValueError(
+                        f"Operation '{name}' expects {expected} comma-separated value(s) "
+                        f"({wanted}), but got {len(parts)}: {value!r}.{hint}"
+                    )
             entry: dict[str, Any] = {"op": name}
             if value is not None:
                 entry["value"] = value
@@ -242,9 +273,8 @@ def register_write_tools(mcp) -> None:
 
         body: dict[str, Any] = dict(fields or {})
         body["operations"] = normalized
-        summary = (
-            f"{len(normalized)} operation(s) on '{feature}' (instance {instance_id})"
-            + (f"; fields {fields}" if fields else "")
+        summary = f"{len(normalized)} operation(s) on '{feature}' (instance {instance_id})" + (
+            f"; fields {fields}" if fields else ""
         )
         plan = plan_store.create(
             owner=current_owner(),
