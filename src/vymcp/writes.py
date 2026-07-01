@@ -172,7 +172,19 @@ def register_write_tools(mcp) -> None:
         """
         operations = await discovery.get_feature_operations(feature)
         fields = await discovery.get_top_level_fields(feature)
-        return {"feature": feature, "top_level_fields": fields, "operations": operations}
+        subject_field = await discovery.get_subject_field(feature)
+        return {
+            "feature": feature,
+            "subject_field": subject_field,
+            "top_level_fields": fields,
+            "operations": operations,
+            "note": (
+                f"This feature requires the '{subject_field}' field (the subject, e.g. the "
+                f"interface name); each op's value supplies the args after it."
+                if subject_field
+                else None
+            ),
+        }
 
     @mcp.tool()
     async def propose_operations(
@@ -198,6 +210,16 @@ def register_write_tools(mcp) -> None:
         if not operations:
             raise ValueError("Provide at least one operation.")
 
+        # Subject features inject a top-level field as each op's first arg, so the
+        # op value only supplies the args AFTER it.
+        subject_field = await discovery.get_subject_field(feature)
+        if subject_field and not (fields or {}).get(subject_field):
+            raise ValueError(
+                f"'{feature}' requires the '{subject_field}' field (e.g. the interface "
+                f"name); pass it in fields."
+            )
+        subject_args = 1 if subject_field else 0
+
         normalized: list[dict[str, Any]] = []
         for op in operations:
             name = op.get("op")
@@ -207,7 +229,7 @@ def register_write_tools(mcp) -> None:
                     f"describe_feature_operations('{feature}') for the vocabulary."
                 )
             value = op.get("value")
-            if vocab[name]["arg_count"] >= 1 and not value:
+            if vocab[name]["arg_count"] - subject_args >= 1 and not value:
                 raise ValueError(f"Operation '{name}' requires a value.")
             entry: dict[str, Any] = {"op": name}
             if value is not None:

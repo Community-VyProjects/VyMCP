@@ -17,23 +17,31 @@ from typing import Any
 
 from .client import get_client
 
-_ops_cache: dict[str, list[dict[str, Any]]] = {}
+_feature_cache: dict[str, dict[str, Any]] = {}
 _openapi_spec: dict[str, Any] | None = None
 
 
 def clear_cache() -> None:
     """Drop cached discovery data (used by tests and on reconnect)."""
     global _openapi_spec
-    _ops_cache.clear()
+    _feature_cache.clear()
     _openapi_spec = None
+
+
+async def _get_feature(feature: str) -> dict[str, Any]:
+    if feature not in _feature_cache:
+        _feature_cache[feature] = await get_client().get(f"/vyos/operations/{feature}")
+    return _feature_cache[feature]
 
 
 async def get_feature_operations(feature: str) -> list[dict[str, Any]]:
     """Op vocabulary for a feature. Raises VyManagerError if the feature is unknown."""
-    if feature not in _ops_cache:
-        data = await get_client().get(f"/vyos/operations/{feature}")
-        _ops_cache[feature] = data.get("operations", [])
-    return _ops_cache[feature]
+    return (await _get_feature(feature)).get("operations", [])
+
+
+async def get_subject_field(feature: str) -> str | None:
+    """The top-level field injected as each op's first arg, or None for plain features."""
+    return (await _get_feature(feature)).get("subject_field")
 
 
 def _resolve_ref(spec: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:

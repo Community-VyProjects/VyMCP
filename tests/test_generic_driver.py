@@ -101,6 +101,53 @@ async def test_propose_rejects_empty(write_tools, install_client):
         await write_tools["propose_operations"]("nat", "i1", [])
 
 
+_BONDING = {
+    "feature": "bonding",
+    "subject_field": "interface_name",
+    "operations": [
+        {"op": "set_interface_disable", "args": ["interface"], "arg_count": 1, "description": "x"},
+        {"op": "set_interface_address", "args": ["interface", "addr"],
+         "arg_count": 2, "description": "x"},
+    ],
+}
+
+
+def _bonding_handler(request: httpx.Request) -> httpx.Response:
+    if request.url.path == "/vyos/operations/bonding":
+        return httpx.Response(200, json=_BONDING)
+    if request.url.path == "/openapi.json":
+        return httpx.Response(200, json={"paths": {}})
+    return httpx.Response(404, json={})
+
+
+async def test_subject_feature_requires_subject(write_tools, install_client):
+    install_client(_bonding_handler)
+    with pytest.raises(ValueError, match="interface_name"):
+        await write_tools["propose_operations"](
+            "bonding", "i1", [{"op": "set_interface_disable"}]
+        )
+
+
+async def test_subject_feature_zero_value_op_ok(write_tools, install_client):
+    install_client(_bonding_handler)
+    # set_interface_disable has arg_count 1, but the subject consumes it -> no value needed
+    plan = await write_tools["propose_operations"](
+        "bonding", "i1", [{"op": "set_interface_disable"}], fields={"interface_name": "bond0"}
+    )
+    from vymcp.changes import plan_store
+    body = plan_store.get(plan["plan_id"]).body
+    assert body == {"interface_name": "bond0", "operations": [{"op": "set_interface_disable"}]}
+
+
+async def test_subject_feature_value_op_needs_value(write_tools, install_client):
+    install_client(_bonding_handler)
+    # set_interface_address has arg_count 2; minus the subject -> 1 value arg required
+    with pytest.raises(ValueError, match="requires a value"):
+        await write_tools["propose_operations"](
+            "bonding", "i1", [{"op": "set_interface_address"}], fields={"interface_name": "bond0"}
+        )
+
+
 async def test_generic_plan_applies(write_tools, install_client):
     def extra(request):
         p = request.url.path
