@@ -86,29 +86,80 @@ plan. Plans are single-use, time-limited, and bound to their target instance.
 - One or more VyOS 1.4 / 1.5 routers registered in VyManager.
 - Python 3.10+.
 
-## Getting started
+## Installation
 
-Install:
+VyMCP runs as a stdio MCP server — your MCP client launches it as a subprocess.
+Pick one of:
 
-```bash
-pip install -e .          # or: pip install -e ".[dev]" for tests
-```
-
-Configure via environment variables (see `.env.example`):
+**pipx (from git):**
 
 ```bash
-export VYMANAGER_BASE_URL="https://vymanager.example.com"
-export VYMANAGER_API_TOKEN="vym_…"      # read-only recommended
-# export VYMANAGER_ENABLE_WRITES=true   # opt in to write tools
+pipx install git+https://github.com/Community-VyProjects/VyMCP
+# provides the `vymcp` command
 ```
 
-Register with an MCP client (stdio). Example client config:
+**From a clone:**
+
+```bash
+git clone https://github.com/Community-VyProjects/VyMCP && cd VyMCP
+pip install .            # or: pip install -e ".[dev]" for development
+```
+
+**Docker:**
+
+```bash
+docker build -t vymcp .
+# run attached (-i) so the client can speak MCP over stdio:
+docker run -i --rm \
+  -e VYMANAGER_BASE_URL=https://vymanager.example.com \
+  -e VYMANAGER_API_TOKEN=vym_… \
+  vymcp
+```
+
+Prebuilt images are published to `ghcr.io/community-vyprojects/vymcp` on release.
+
+## Configuration
+
+All configuration is via environment variables (see `.env.example`):
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `VYMANAGER_BASE_URL` | yes | — | Base URL of the VyManager API. |
+| `VYMANAGER_API_TOKEN` | yes | — | A `vym_` token (Sites → API Tokens; read-only recommended). |
+| `VYMANAGER_VERIFY_SSL` | no | `true` | Verify VyManager's TLS certificate. |
+| `VYMANAGER_TIMEOUT` | no | `30` | Request timeout, seconds. |
+| `VYMANAGER_ENABLE_WRITES` | no | `false` | Register the write tools (off by default). |
+
+## Connecting an MCP client
+
+Register VyMCP with your MCP client (Claude Desktop, an IDE, etc.). Command-based:
 
 ```json
 {
   "mcpServers": {
     "vymcp": {
       "command": "vymcp",
+      "env": {
+        "VYMANAGER_BASE_URL": "https://vymanager.example.com",
+        "VYMANAGER_API_TOKEN": "vym_…"
+      }
+    }
+  }
+}
+```
+
+Or via Docker:
+
+```json
+{
+  "mcpServers": {
+    "vymcp": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "VYMANAGER_BASE_URL", "-e", "VYMANAGER_API_TOKEN",
+        "ghcr.io/community-vyprojects/vymcp"
+      ],
       "env": {
         "VYMANAGER_BASE_URL": "https://vymanager.example.com",
         "VYMANAGER_API_TOKEN": "vym_…"
