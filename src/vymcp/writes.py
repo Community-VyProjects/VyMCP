@@ -12,7 +12,7 @@ from typing import Any
 
 from . import discovery
 from .changes import Plan, plan_store
-from .client import VyManagerError, get_client
+from .client import VyManagerError, current_client, current_owner
 from .config import writes_enabled
 from .validation import validate_identifier, validate_values
 
@@ -41,7 +41,7 @@ def _plan_response(plan: Plan) -> dict[str, Any]:
 async def _safe_get(path: str, instance_id: str) -> Any | None:
     """Best-effort read used to enrich an apply response; never fails the apply."""
     try:
-        return await get_client().get(path, instance_id=instance_id)
+        return await current_client().get(path, instance_id=instance_id)
     except VyManagerError:
         return None
 
@@ -83,6 +83,7 @@ def register_write_tools(mcp) -> None:
             + (f"; description {description!r}" if description else "")
         )
         plan = plan_store.create(
+            owner=current_owner(),
             instance_id=instance_id,
             feature="firewall/groups",
             path=FIREWALL_GROUPS_PATH,
@@ -105,6 +106,7 @@ def register_write_tools(mcp) -> None:
             f"{instance_id}: {', '.join(members)}"
         )
         plan = plan_store.create(
+            owner=current_owner(),
             instance_id=instance_id,
             feature="firewall/groups",
             path=FIREWALL_GROUPS_PATH,
@@ -127,6 +129,7 @@ def register_write_tools(mcp) -> None:
             f"{instance_id}: {', '.join(members)}"
         )
         plan = plan_store.create(
+            owner=current_owner(),
             instance_id=instance_id,
             feature="firewall/groups",
             path=FIREWALL_GROUPS_PATH,
@@ -149,6 +152,7 @@ def register_write_tools(mcp) -> None:
             "Any firewall rule referencing it may be affected."
         )
         plan = plan_store.create(
+            owner=current_owner(),
             instance_id=instance_id,
             feature="firewall/groups",
             path=FIREWALL_GROUPS_PATH,
@@ -243,6 +247,7 @@ def register_write_tools(mcp) -> None:
             + (f"; fields {fields}" if fields else "")
         )
         plan = plan_store.create(
+            owner=current_owner(),
             instance_id=instance_id,
             feature=feature,
             path=f"/vyos/{feature}/batch",
@@ -271,14 +276,14 @@ def register_write_tools(mcp) -> None:
                 "Refusing to apply: set confirm=true only after the user has reviewed "
                 "and approved this exact plan."
             )
-        plan = plan_store.get(plan_id)
+        plan = plan_store.get(plan_id, current_owner())
         if plan is None:
             raise ValueError(
                 "Unknown or expired plan_id. Re-run the propose tool, show the user the "
                 "new plan, then apply it."
             )
 
-        client = get_client()
+        client = current_client()
 
         # Prime VyManager's diff baseline before changing anything. Its snapshot is
         # initialized on first read, so without this the post-change diff/discard
@@ -333,7 +338,7 @@ def register_write_tools(mcp) -> None:
     @mcp.tool()
     async def confirm_change(instance_id: str) -> dict[str, Any]:
         """Confirm an active commit-confirm, making the change permanent and saving it."""
-        result = await get_client().post(_CC_CONFIRM, instance_id=instance_id)
+        result = await current_client().post(_CC_CONFIRM, instance_id=instance_id)
         return {
             "confirmed": bool(result.get("success", True)) if isinstance(result, dict) else True,
             "message": result.get("message") if isinstance(result, dict) else None,
@@ -355,7 +360,7 @@ def register_write_tools(mcp) -> None:
                 "If the change locked you out, wait for the auto-revert. Otherwise call "
                 "confirm_change(instance_id), then apply the inverse change to undo it."
             )
-        result = await get_client().post(_DISCARD, instance_id=instance_id)
+        result = await current_client().post(_DISCARD, instance_id=instance_id)
         return {
             "discarded": bool(result.get("success", True)) if isinstance(result, dict) else True,
             "message": result.get("message") if isinstance(result, dict) else None,
@@ -365,7 +370,7 @@ def register_write_tools(mcp) -> None:
     @mcp.tool()
     async def get_pending_changes(instance_id: str) -> dict[str, Any]:
         """Show unsaved changes and any active commit-confirm rollback timer for an instance."""
-        client = get_client()
+        client = current_client()
         diff = await client.get(_CONFIG_DIFF, instance_id=instance_id)
         status = await client.get(_CC_STATUS, instance_id=instance_id)
         return {

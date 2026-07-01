@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .client import get_client
+from .client import current_client
 
 _feature_cache: dict[str, dict[str, Any]] = {}
 _openapi_spec: dict[str, Any] | None = None
@@ -30,7 +30,7 @@ def clear_cache() -> None:
 
 async def _get_feature(feature: str) -> dict[str, Any]:
     if feature not in _feature_cache:
-        _feature_cache[feature] = await get_client().get(f"/vyos/operations/{feature}")
+        _feature_cache[feature] = await current_client().get(f"/vyos/operations/{feature}")
     return _feature_cache[feature]
 
 
@@ -64,7 +64,7 @@ async def get_top_level_fields(feature: str) -> dict[str, dict[str, Any]]:
     global _openapi_spec
     if _openapi_spec is None:
         try:
-            _openapi_spec = await get_client().get("/openapi.json")
+            _openapi_spec = await current_client().get("/openapi.json")
         except Exception:
             return {}
 

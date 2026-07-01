@@ -71,7 +71,7 @@ async def test_apply_logical_failure_not_applied(write_tools, install_client):
     assert "rejected" in res["error"]
     # a failed apply leaves the plan usable for a retry
     from vymcp.changes import plan_store
-    assert plan_store.get(plan["plan_id"]) is not None
+    assert plan_store.get(plan["plan_id"], "local") is not None
 
 
 async def test_apply_read_only_token_blocked(write_tools, install_client):

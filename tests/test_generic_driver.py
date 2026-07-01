@@ -72,7 +72,7 @@ async def test_propose_builds_body_with_fields(write_tools, install_client):
     )
     assert plan["applied"] is False
     from vymcp.changes import plan_store
-    body = plan_store.get(plan["plan_id"]).body
+    body = plan_store.get(plan["plan_id"], "local").body
     assert body == {"nat_type": "source", "operations": [{"op": "set_source_rule", "value": "100"}]}
 
 
@@ -92,7 +92,7 @@ async def test_propose_zero_arg_op_needs_no_value(write_tools, install_client):
     install_client(_discovery_handler())
     plan = await write_tools["propose_operations"]("nat", "i1", [{"op": "delete_all"}])
     from vymcp.changes import plan_store
-    assert plan_store.get(plan["plan_id"]).body["operations"] == [{"op": "delete_all"}]
+    assert plan_store.get(plan["plan_id"], "local").body["operations"] == [{"op": "delete_all"}]
 
 
 async def test_propose_rejects_empty(write_tools, install_client):
@@ -135,7 +135,7 @@ async def test_subject_feature_zero_value_op_ok(write_tools, install_client):
         "bonding", "i1", [{"op": "set_interface_disable"}], fields={"interface_name": "bond0"}
     )
     from vymcp.changes import plan_store
-    body = plan_store.get(plan["plan_id"]).body
+    body = plan_store.get(plan["plan_id"], "local").body
     assert body == {"interface_name": "bond0", "operations": [{"op": "set_interface_disable"}]}
 
 
